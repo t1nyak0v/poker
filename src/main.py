@@ -13,7 +13,7 @@ def main():
     user = player.UserPlayer()
     players.append(user)
 
-    for i in range(PLAYERS_NUM - 1):
+    for _ in range(PLAYERS_NUM - 1):
         players.append(player.BotPlayer())
 
     master = game.Game(players)

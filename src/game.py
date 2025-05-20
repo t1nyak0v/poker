@@ -98,7 +98,7 @@ class Game():
                 self._handle_betting_round()
                 self._advance_stage()
 
-            self._handle_showdown()
+            self._handle_showdown(player.Player())
 
             if self._check_game_over():
                 self.is_game_going = False
@@ -142,11 +142,58 @@ class Game():
             elif self.stage in [GameStage.TURN, GameStage.RIVER]:
                 self.community_cards.extend(self.deck.deal(1))
 
-    def _handle_showdown(self, player: player.Player) -> str:
-        return ""
-    
-    def _check_game_over(self):
-        pass
+    def _handle_showdown(self, current_player: player.Player) -> None:
+        active_players = [p for p in self.players if p.is_active]
 
-    def _process_decision(self, current_player, decision):
-        pass
+        if len(active_players) == 1:
+            active_players[0].stack += self.pot
+        else:
+            winner = self._determine_winner(active_players)
+            winner.stack += self.pot
+
+    def _handle_call(self, current_player: player.Player) -> None:
+        call_amount = self.current_bet - current_player.current_bet
+        current_player.stack -= call_amount
+        current_player.current_bet += call_amount
+        self.pot += call_amount
+
+    def _handle_raise(self, current_player: player.Player) -> None:
+        min_raise = self.current_bet * 2
+        raise_amount = min_raise # Simple logic, redesign later
+        current_player.stack -= raise_amount
+        current_player.current_bet += raise_amount
+        self.pot += raise_amount
+        self.current_bet = raise_amount
+    
+    def _check_game_over(self) -> bool:
+        """If players number with non-zero stack more than 1, PLAY MUST GO ON"""
+        return sum(1 for p in self.players if p.stack > 0) <= 1
+
+    def _process_decision(self, current_player: player.Player, decision: str):
+        if decision == 'fold':
+            current_player.is_active = False
+        elif decision == 'call':
+            self._handle_call(current_player)
+        elif decision == 'raise':
+            self._handle_raise(current_player)
+
+    def _determine_winner(self, players: List[player.Player]) -> player.Player:
+        """For now, there are shit logic of determine winner, i'll redesign it later on"""
+        return random.choice(players)
+
+    # for GUI
+    def get_game_stat(self) -> Dict:
+        """Return game statistic"""
+        return {
+                'community_cards': self.community_cards,
+                'pot': self.pot,
+                'current_bet': self.current_bet,
+                'players': [
+                    {
+                        'hand': p.hand,
+                        'stack': p.stack,
+                        'current_bet': p.current_bet,
+                        'is_active': p.is_active
+                    } for p in self.players
+                ]
+            }
