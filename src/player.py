@@ -1,12 +1,15 @@
 
 
+import random
+
+
 class Player():
     def __init__(self, hand=None):
         self.hand = hand if hand is not None else []
         self.position: int = -1
 
         self.current_bet: int = 0
-        self.stack: int = 0
+        self.stack: int = 1000
 
         self.is_hand_known: bool = False
         self.is_active: bool = True
@@ -28,7 +31,7 @@ class Player():
         return self.hand
 
     def get_decision(self) -> str:
-        return "DEBUG"
+        return random.choice(["fold", "raise", "call"])
 
     # DEBUG
 
@@ -50,4 +53,4 @@ class BotPlayer(Player):
         super().__init__(hand)
 
     def get_hand(self) -> list:
-        return super().get_hand() if self.is_hand_known else ["Unknown",""]
+        return super().get_hand() if self.is_hand_known else ["?? ??",""]

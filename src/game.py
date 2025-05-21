@@ -1,12 +1,40 @@
-import random
 from enum import Enum
+import random
 from typing import List, Dict
 
-import player
+class Card:
+    def __init__(self, rank: str, suit: str):
+        self.rank = rank
+        self.suit = suit
 
-MIN_BET = 10
-SMALL_BLIND = 10
-BIG_BLIND = 20
+    def __repr__(self):
+        return f"{self.rank}{self.suit}"
+
+class Deck:
+    def __init__(self):
+        self.cards: List[Card] = []
+        self.reset()
+
+    def reset(self):
+        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+        suits = ['♠', '♥', '♦', '♣']
+        self.cards = [Card(rank, suit) for suit in suits for rank in ranks]
+        self.shuffle()
+
+    def shuffle(self):
+        random.shuffle(self.cards)
+
+    def deal(self, num_cards: int) -> List[Card]:
+        return [self.cards.pop() for _ in range(num_cards)]
+
+class Player:
+    def __init__(self, is_bot: bool, stack: int = 1000):
+        self.is_bot: bool = is_bot
+        self.stack: int = stack
+        self.cards: List[Card] = []
+        self.current_bet: int = 0
+        self.is_active: bool = True
+        self.is_all_in: bool = False
 
 class GameStage(Enum):
     PREFLOP = "pre-flop"
@@ -15,185 +43,149 @@ class GameStage(Enum):
     RIVER = "river"
     SHOWDOWN = "showdown"
 
-class Game():
-    def __init__(self, players: List[player.Player] = []):
-        self.players: List[player.Player] = players
-        self.active_players: List[player.Player] = []
-
-        self.dealer_position: int = 0
-
+class PokerGame:
+    def __init__(self, num_players: int = 6):
+        self.players: List[Player] = self._initialize_players(num_players)
+        self.deck: Deck = Deck()
+        self.community_cards: List[Card] = []
         self.pot: int = 0
-        self.deck: Game.Deck = Game.Deck()
         self.current_bet: int = 0
-        self.community_cards: List[Game.Card] = []
+        self.dealer_position: int = 0
+        self.stage: GameStage = GameStage.PREFLOP
+        self.active_players: List[Player] = []
+        self.game_over: bool = False
+        self.waiting_for_human_input: bool = False
+        self.current_player_index: int = 0
+        self.human_player_index: int = num_players - 1
+        self.last_raiser: int = -1
 
-        self.game_stage: GameStage = GameStage.PREFLOP
-        self.betting_round_complite: bool = False
-        self.is_game_going: bool = True
+    def _initialize_players(self, num_players: int) -> List[Player]:
+        return [Player(is_bot=True) for _ in range(num_players-1)] + [Player(is_bot=False)]
 
-    class Card:
-        def __init__(self, rank:str, suit: str):
-            self.rank = rank
-            self.suit = suit
-
-    class Deck:
-        def __init__(self) -> None:
-            self.cards: List[Game.Card] = []
-            self.reset()
-
-        def reset(self) -> None:
-            self.cards = self._generate()
-
-        def _generate(self) -> List:
-            suits = ['♥', '♦', '♣', '♠']
-            ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
-            deck = [Game.Card(rank, suit) for suit in suits for rank in ranks]
-            return deck
-
-        def shuffle(self) -> None:
-            random.shuffle(self.cards)
-
-        def deal(self, num_cards: int) -> List: # it should be List[Game.Card] here, but for some reason it doesn't work. Someday i'll have to figure out
-            return [self.cards.pop() for _ in range(num_cards)]
-
-    def _initialize_players(self, num_players: int) -> List[player.Player]:
-        players: List[player.Player] = []
-        players.append(player.UserPlayer())
-
-        for _ in range(num_players - 1):
-            players.append(player.BotPlayer())
-
-        return players
-
-
-    def start_new_hangout(self):
+    def start_new_hand(self):
         self.community_cards.clear()
         self.deck.reset()
-        self.deck.shuffle()
-
+        
         for player in self.players:
-            player.set_hand(self.deck.deal(2))
-
+            player.cards = self.deck.deal(2)
+            player.is_active = True
+            player.current_bet = 0
+        
         self.dealer_position = (self.dealer_position + 1) % len(self.players)
         self._post_blinds()
-
-        self.active_players = [player for player in self.players if player.is_active]
+        self.active_players = [p for p in self.players if p.is_active]
         self.stage = GameStage.PREFLOP
-        self.betting_round_complite = False
+        self.current_player_index = (self.dealer_position + 3) % len(self.players)
+        self.last_raiser = -1
 
     def _post_blinds(self):
         sb_pos = (self.dealer_position + 1) % len(self.players)
         bb_pos = (sb_pos + 1) % len(self.players)
+        small_blind = 10
+        big_blind = 20
+        
+        self.players[sb_pos].stack -= small_blind
+        self.players[bb_pos].stack -= big_blind
+        self.pot += small_blind + big_blind
+        self.current_bet = big_blind
 
-        self.players[sb_pos].stack -= SMALL_BLIND
-        self.players[bb_pos].stack -= BIG_BLIND
-        self.pot += SMALL_BLIND + BIG_BLIND
-        self.current_bet = BIG_BLIND
+    def game_step(self):
+        if self.stage == GameStage.SHOWDOWN:
+            self._handle_showdown()
+            self.start_new_hand()
+            return
 
-    def game_loop(self) -> None:
-        while self.is_game_going:
-            self.start_new_hangout()
+        if self._betting_round_complete():
+            self._advance_stage()
+        else:
+            self._handle_player_turn()
 
-            while self.stage != GameStage.SHOWDOWN:
-                self._handle_betting_round()
-                self._advance_stage()
+    def _handle_player_turn(self):
+        player = self.active_players[self.current_player_index]
+        
+        if player.is_active:
+            if player.is_bot:
+                decision = self._bot_decision(player)
+                self._process_decision(player, decision)
+                self._next_player()
+            else:
+                self.waiting_for_human_input = True
 
-            self._handle_showdown(player.Player())
+    def make_human_decision(self, decision: str):
+        player = self.active_players[self.current_player_index]
+        self._process_decision(player, decision)
+        self.waiting_for_human_input = False
+        self._next_player()
 
-            if self._check_game_over():
-                self.is_game_going = False
+    def _next_player(self):
+        self.current_player_index = (self.current_player_index + 1) % len(self.active_players)
+        if self.current_player_index == self.last_raiser:
+            self.last_raiser = -1
+            self.current_bet = 0
+            return
 
-    def _handle_betting_round(self):
-        self.betting_round_complite = False
-        last_raiser = None
-        current_player_index = (self.dealer_position + 3) % len(self.players)
+    def _betting_round_complete(self):
+        return self.last_raiser == -1 and all(
+            p.current_bet == self.current_bet or not p.is_active 
+            for p in self.active_players
+        )
 
-        while not self.betting_round_complite:
-            current_player = self.active_players[current_player_index]
+    def _bot_decision(self, player: Player) -> str:
+        hand_strength = random.uniform(0, 1)
+        if hand_strength > 0.8:
+            return 'raise'
+        elif hand_strength > 0.4 or self.current_bet == 0:
+            return 'call'
+        else:
+            return 'fold'
 
-            if current_player.is_active and not current_player.is_all_in:
-                decision = current_player.get_decision()
-                self._process_decision(current_player, decision)
-
-                if decision == "raise":
-                    last_raiser = current_player_index
-
-            current_player_index = (current_player_index + 1) % len(self.active_players)
-
-            if current_player_index == last_raiser:
-                self.betting_round_complite = True
+    def _process_decision(self, player: Player, decision: str):
+        if decision == 'fold':
+            player.is_active = False
+        elif decision == 'call':
+            call_amount = self.current_bet - player.current_bet
+            player.stack -= call_amount
+            player.current_bet += call_amount
+            self.pot += call_amount
+        elif decision == 'raise':
+            raise_amount = self.current_bet * 2
+            player.stack -= raise_amount
+            player.current_bet += raise_amount
+            self.pot += raise_amount
+            self.current_bet = raise_amount
+            self.last_raiser = self.current_player_index
 
     def _advance_stage(self):
-        stage_order = [
-                GameStage.PREFLOP,
-                GameStage.FLOP,
-                GameStage.TURN,
-                GameStage.RIVER,
-                GameStage.SHOWDOWN
-            ]
-
-        current_index = stage_order.index(self.stage)
-
-        if current_index < len(stage_order) - 1:
-            self.stage = stage_order[current_index + 1]
-
-            if self.stage == GameStage.FLOP:
-                self.community_cards.extend(self.deck.deal(3))
-            elif self.stage in [GameStage.TURN, GameStage.RIVER]:
-                self.community_cards.extend(self.deck.deal(1))
-
-    def _handle_showdown(self, current_player: player.Player) -> None:
-        active_players = [p for p in self.players if p.is_active]
-
-        if len(active_players) == 1:
-            active_players[0].stack += self.pot
+        stages = [GameStage.PREFLOP, GameStage.FLOP, 
+                 GameStage.TURN, GameStage.RIVER]
+        idx = stages.index(self.stage)
+        if idx < len(stages) - 1:
+            self.stage = stages[idx + 1]
+            cards_to_deal = 3 if self.stage == GameStage.FLOP else 1
+            self.community_cards.extend(self.deck.deal(cards_to_deal))
         else:
-            winner = self._determine_winner(active_players)
+            self.stage = GameStage.SHOWDOWN
+
+    def _handle_showdown(self):
+        active_players = [p for p in self.players if p.is_active]
+        if len(active_players) > 1:
+            winner = random.choice(active_players)
             winner.stack += self.pot
+        self.pot = 0
 
-    def _handle_call(self, current_player: player.Player) -> None:
-        call_amount = self.current_bet - current_player.current_bet
-        current_player.stack -= call_amount
-        current_player.current_bet += call_amount
-        self.pot += call_amount
-
-    def _handle_raise(self, current_player: player.Player) -> None:
-        min_raise = self.current_bet * 2
-        raise_amount = min_raise # Simple logic, redesign later
-        current_player.stack -= raise_amount
-        current_player.current_bet += raise_amount
-        self.pot += raise_amount
-        self.current_bet = raise_amount
-    
-    def _check_game_over(self) -> bool:
-        """If players number with non-zero stack more than 1, PLAY MUST GO ON"""
-        return sum(1 for p in self.players if p.stack > 0) <= 1
-
-    def _process_decision(self, current_player: player.Player, decision: str):
-        if decision == 'fold':
-            current_player.is_active = False
-        elif decision == 'call':
-            self._handle_call(current_player)
-        elif decision == 'raise':
-            self._handle_raise(current_player)
-
-    def _determine_winner(self, players: List[player.Player]) -> player.Player:
-        """For now, there are shit logic of determine winner, i'll redesign it later on"""
-        return random.choice(players)
-
-    # for GUI
-    def get_game_stat(self) -> Dict:
-        """Return game statistic"""
+    def get_game_state(self) -> Dict:
         return {
-                'community_cards': self.community_cards,
-                'pot': self.pot,
-                'current_bet': self.current_bet,
-                'players': [
-                    {
-                        'hand': p.hand,
-                        'stack': p.stack,
-                        'current_bet': p.current_bet,
-                        'is_active': p.is_active
-                    } for p in self.players
-                ]
-            }
+            'community_cards': self.community_cards,
+            'pot': self.pot,
+            'players': [
+                {
+                    'cards': p.cards,
+                    'stack': p.stack,
+                    'current_bet': p.current_bet,
+                    'is_active': p.is_active,
+                    'is_bot': p.is_bot
+                } for p in self.players
+            ],
+            'current_bet': self.current_bet,
+            'waiting_for_input': self.waiting_for_human_input
+        }
