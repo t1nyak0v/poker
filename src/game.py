@@ -165,8 +165,8 @@ class Game():
         self.pot += raise_amount
         self.current_bet = raise_amount
     
+    """If players number with non-zero stack more than 1, PLAY MUST GO ON"""
     def _check_game_over(self) -> bool:
-        """If players number with non-zero stack more than 1, PLAY MUST GO ON"""
         return sum(1 for p in self.players if p.stack > 0) <= 1
 
     def _process_decision(self, current_player: player.Player, decision: str):
@@ -177,13 +177,13 @@ class Game():
         elif decision == 'raise':
             self._handle_raise(current_player)
 
+    """For now, there are shit logic of determine winner, i'll redesign it later on"""
     def _determine_winner(self, players: List[player.Player]) -> player.Player:
-        """For now, there are shit logic of determine winner, i'll redesign it later on"""
         return random.choice(players)
 
     # for GUI
+    """Return game statistic"""
     def get_game_stat(self) -> Dict:
-        """Return game statistic"""
         return {
                 'community_cards': self.community_cards,
                 'pot': self.pot,
